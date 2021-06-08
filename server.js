@@ -7,118 +7,120 @@ const bodyParser = require('body-parser');
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
+//Import the mongoose module
+var mongoose = require('mongoose');
+const moment = require('moment')
+
+//Set up default mongoose connection
+var mongoDB = 'mongodb://localhost:27017/local';
+mongoose.connect(mongoDB, { useNewUrlParser: true, useUnifiedTopology: true });
+
+//Get the default connection
+var db = mongoose.connection;
+
+//Bind connection to error event (to get notification of connection errors)
+db.on('error', console.error.bind(console, 'MongoDB connection error:'));
+
+var Schema = mongoose.Schema;
+
+var userSchema = new Schema({
+  username: String
+});
+
+var exerciseSchema = new Schema({
+  description: String,
+  duration: String,
+  date: String,
+  user_id: String,
+  d: Date
+}
+);
+var User = mongoose.model('User', userSchema);
+var Exercise = mongoose.model('Extercise', exerciseSchema);
 
 app.use(cors())
 app.use(express.static('public'))
+
 app.get('/', (req, res) => {
   res.sendFile(__dirname + '/views/index.html')
 });
 
-var users = []
-var idCounter = 0;
 
 /// nije prihvatalo api/users dok nisam stavio id da je string - cudno
 app.post('/api/users', function (req, res) {
-  var user = req.body.username;
+  var username = req.body.username;
 
-  var newUser = { "username": user, "_id": String(idCounter++), "log": [], "count": 0 };
-  users.push(newUser);
-  res.json(newUser);
+  User.create({ username: username }, function (err, usr) {
+    if (err) return handleError(err);
+    res.json({ "username": usr.username, "_id": usr._id });
+  });
+
 });
 
-const monthNames = ["January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December"
-];
-var dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 app.get('/api/users', function (req, res) {
-  //  console.log( users.length );
-  //var filteredUsers = users.map( //el=>console.log(el) );
-  var filteredUsers = users.map((el) => {
-    return { "_id": el._id, "username": el.username }
+  User.find({}, function (err, users) {
+    if (err) handleError(err);
+    res.json(users);
   });
-  res.json(filteredUsers);
+
 });
 
 app.post('/api/users/:_id/exercises', function (req, res) {
-  var danas = new Date();
+  var id = req.params._id;
   var description = req.body.description;
   var duration = Number(req.body.duration);
-  // console.log('dodajem novi poso')
 
-
-  ///bitno: imao problem sto nisam stavio ovaj drugi uslov. cak nije radilo ako se stavi undefined. koja je razlika izmedju npr !varijabla, varijabla===undefined i slicno?
   if (req.body.date === '' || !req.body.date)
     today = new Date();
   else today = new Date(req.body.date);
-  var dd = String(today.getDate()).padStart(2, '0');
-  var mm = String(today.getMonth() + 1).padStart(2, '0'); //January is 0!
-  var yyyy = today.getFullYear();
-  var day = today.getDay();
 
-  date = dayNames[day].substr(0, 3) + ' ' + monthNames[Number(mm) - 1].substr(0, 3) + ' ' + dd + ' ' + yyyy;
+  var date = moment(today).format("ddd MMM D YYYY");
 
-  console.log(date)
+  Exercise.create({ user_id: id, description: description, duration: duration, date: date, d: moment(today) }, function (err, exercise) {
+    if (err) return handleError(err);
+    User.findById(id, function (err, user) {
+      if (err) handleError(err);
+      res.json({ "username": user.username, "_id": id, "description": description, "duration": duration, "date": date });
+    });
+  });
 
-  var id = req.params._id;
-  usr = users.find(el => el._id === id);
-  var idx = users.indexOf(usr);
-
-  usr = { ...usr, count: usr.count + 1, log: [...usr.log, { "description": description, "duration": duration, "date": date, "d": today }] };
-  var o = { "username": usr.username, "_id": usr._id, "description": description, "duration": duration, "date": date };
-
-  users[idx] = usr;
-  res.json(o);
 });
 
 app.get('/api/users/:_id/logs', function (req, res) {
-
-
   var id = req.params._id;
   var from = req.query.from;
   var to = req.query.to;
   var limit = Number(req.query.limit);
-  // console.log(limit);
-  //var dateFrom, dateTo;
-  usr = { ...users.find(el => el._id == id) };
-  usr.log = [...usr.log]
+
   if (from && from != '') {
     from = new Date(from);
-
-    var dd = String(from.getDate()).padStart(2, '0');
-    var mm = String(from.getMonth() + 1).padStart(2, '0'); //January is 0!
-    var yyyy = from.getFullYear();
-    var day = from.getDay();
-
-    var dateFrom = dayNames[day].substr(0, 3) + ' ' + monthNames[Number(mm) - 1].substr(0, 3) + ' ' + dd + ' ' + yyyy;
+    var dateFrom = moment(from).format("ddd MMM D YYYY");
   }
   else from = new Date('0000-01-01');
   if (to != '' && to) {
-    console.log("evo")
-    console.log(to)
     to = new Date(to);
-    var dd = String(to.getDate()).padStart(2, '0');
-    var mm = String(to.getMonth() + 1).padStart(2, '0'); //January is 0!
-    var yyyy = to.getFullYear();
-    var day = to.getDay();
-
-    var dateTo = dayNames[day].substr(0, 3) + ' ' + monthNames[Number(mm) - 1].substr(0, 3) + ' ' + dd + ' ' + yyyy;
-
+    var dateTo = moment(to).format("ddd MMM D YYYY");
   }
   else to = new Date('9999-01-01')
 
 
-  usr.log = usr.log.filter((el) => {
+  User.findById(id, function (err, user) {
 
-    return (el.d >= from && el.d <= to)
+    if (err) { console.log("hreska"); handleError(err); }
+    /// usr = { ...user };  /// zasto ovo nije htjelo
+    Exercise.find(
+      {
+        user_id: id
+        , d: { "$gte": (from), "$lte": (to) }
+      }, function (err, exercises) {
+        if (err) handleError(err);
+        var log = exercises;
+        if (Number(limit) > 0) log = log.slice(0, limit);
+        res.json({ "_id": user._id, "username": user.username, count: log.length, from: dateFrom, to: dateTo, log: log })
+
+      });
   });
-  usr = { ...usr, "from": dateFrom, "to": dateTo };
-  if (Number(limit) > 0)
-    usr.log = usr.log.slice(0, limit);
-  usr.count = usr.log.length;
-
-
-  res.json(usr);
 });
 
 
